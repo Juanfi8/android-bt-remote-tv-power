@@ -1,0 +1,914 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Codex <codex@openai.com>
+Subject: [PATCH] Add media intents and a minimalist remote layout editor
+
+Expose play/pause and track skipping through the Tasker command receiver.
+Let users assign and move buttons in the minimalist panel, and persist
+its layout in the existing remote settings.
+
+diff --git a/app/src/main/java/com/atharok/btremote/data/dataStore/SettingsDataStore.kt b/app/src/main/java/com/atharok/btremote/data/dataStore/SettingsDataStore.kt
+index 3da317e..7986f67 100644
+--- a/app/src/main/java/com/atharok/btremote/data/dataStore/SettingsDataStore.kt
++++ b/app/src/main/java/com/atharok/btremote/data/dataStore/SettingsDataStore.kt
+@@ -29,6 +29,7 @@ import com.atharok.btremote.domain.entities.remoteInput.PhysicalVolumeButtonActi
+ import com.atharok.btremote.domain.entities.remoteInput.keyboard.KeyboardLanguage
+ import com.atharok.btremote.domain.entities.settings.AppearanceSettings
+ import com.atharok.btremote.domain.entities.settings.RemoteSettings
++import com.atharok.btremote.domain.entities.settings.MinimalistLayout
+ import com.atharok.btremote.domain.entities.settings.ThemeEntity
+ import kotlinx.coroutines.flow.Flow
+ import kotlinx.coroutines.flow.catch
+@@ -79,6 +80,7 @@ class SettingsDataStore(private val context: Context) {
+     private val useAdvancedKeyboardKey = booleanPreferencesKey(USE_ADVANCED_KEYBOARD_KEY)
+     private val useAdvancedKeyboardIntegratedKey  = booleanPreferencesKey(USE_ADVANCED_KEYBOARD_INTEGRATED_KEY)
+     private val useMinimalistRemoteKey = booleanPreferencesKey(USE_MINIMALIST_REMOTE_KEY)
++    private val minimalistLayoutKey = stringPreferencesKey("minimalist_layout")
+     private val remoteNavigationKey = stringPreferencesKey(REMOTE_NAVIGATION_KEY)
+     private val useEnterForSelectionKey = booleanPreferencesKey(USE_ENTER_FOR_SELECTION_KEY)
+     private val useMouseNavigationByDefaultKey = booleanPreferencesKey(USE_MOUSE_NAVIGATION_BY_DEFAULT_KEY)
+@@ -169,6 +171,7 @@ class SettingsDataStore(private val context: Context) {
+                     DEFAULT_REMOTE_NAVIGATION
+                 },
+                 useMinimalistRemote = preferences[useMinimalistRemoteKey] ?: DEFAULT_USE_MINIMALIST_REMOTE,
++                minimalistLayout = MinimalistLayout.decode(preferences[minimalistLayoutKey]),
+                 useEnterForSelection = preferences[useEnterForSelectionKey] ?: DEFAULT_USE_ENTER_FOR_SELECTION,
+                 useMouseNavigationByDefault = preferences[useMouseNavigationByDefaultKey] ?: USE_MOUSE_NAVIGATION_BY_DEFAULT,
+                 physicalVolumeUpButtonAction = try {
+@@ -244,6 +247,10 @@ class SettingsDataStore(private val context: Context) {
+         }
+     }
+
++    suspend fun saveMinimalistLayout(layout: MinimalistLayout) {
++        context.dataStore.edit { it[minimalistLayoutKey] = layout.encode() }
++    }
++
+     suspend fun saveRemoteNavigation(remoteNavigationEntity: RemoteNavigationEntity) {
+         context.dataStore.edit {
+             it[remoteNavigationKey] = remoteNavigationEntity.name
+diff --git a/app/src/main/java/com/atharok/btremote/data/repositories/DataStoreRepositoryImpl.kt b/app/src/main/java/com/atharok/btremote/data/repositories/DataStoreRepositoryImpl.kt
+index 5dbf917..3048e90 100644
+--- a/app/src/main/java/com/atharok/btremote/data/repositories/DataStoreRepositoryImpl.kt
++++ b/app/src/main/java/com/atharok/btremote/data/repositories/DataStoreRepositoryImpl.kt
+@@ -6,6 +6,7 @@ import com.atharok.btremote.domain.entities.remoteInput.PhysicalVolumeButtonActi
+ import com.atharok.btremote.domain.entities.remoteInput.keyboard.KeyboardLanguage
+ import com.atharok.btremote.domain.entities.settings.AppearanceSettings
+ import com.atharok.btremote.domain.entities.settings.RemoteSettings
++import com.atharok.btremote.domain.entities.settings.MinimalistLayout
+ import com.atharok.btremote.domain.entities.settings.ThemeEntity
+ import com.atharok.btremote.domain.repositories.DataStoreRepository
+ import kotlinx.coroutines.flow.Flow
+@@ -76,6 +77,10 @@ class DataStoreRepositoryImpl(
+         settingsDataStore.saveUseMinimalistRemote(useMinimalistRemote)
+     }
+
++    override suspend fun saveMinimalistLayout(layout: MinimalistLayout) {
++        settingsDataStore.saveMinimalistLayout(layout)
++    }
++
+     override suspend fun saveRemoteNavigation(remoteNavigationEntity: RemoteNavigationEntity) {
+         settingsDataStore.saveRemoteNavigation(remoteNavigationEntity)
+     }
+diff --git a/app/src/main/java/com/atharok/btremote/domain/entities/settings/RemoteSettings.kt b/app/src/main/java/com/atharok/btremote/domain/entities/settings/RemoteSettings.kt
+index 9bffd2c..1a815d2 100644
+--- a/app/src/main/java/com/atharok/btremote/domain/entities/settings/RemoteSettings.kt
++++ b/app/src/main/java/com/atharok/btremote/domain/entities/settings/RemoteSettings.kt
+@@ -32,6 +32,7 @@ data class RemoteSettings(
+     // ---- Remote ----
+     val remoteNavigationEntity: RemoteNavigationEntity = DEFAULT_REMOTE_NAVIGATION,
+     val useMinimalistRemote: Boolean = DEFAULT_USE_MINIMALIST_REMOTE,
++    val minimalistLayout: MinimalistLayout = MinimalistLayout.Default,
+     val useEnterForSelection: Boolean = DEFAULT_USE_ENTER_FOR_SELECTION,
+     val useMouseNavigationByDefault: Boolean = USE_MOUSE_NAVIGATION_BY_DEFAULT,
+     val physicalVolumeUpButtonAction: PhysicalVolumeButtonAction = PhysicalVolumeButtonAction.DEFAULT,
+diff --git a/app/src/main/java/com/atharok/btremote/domain/repositories/DataStoreRepository.kt b/app/src/main/java/com/atharok/btremote/domain/repositories/DataStoreRepository.kt
+index 3925090..d2d4eba 100644
+--- a/app/src/main/java/com/atharok/btremote/domain/repositories/DataStoreRepository.kt
++++ b/app/src/main/java/com/atharok/btremote/domain/repositories/DataStoreRepository.kt
+@@ -5,6 +5,7 @@ import com.atharok.btremote.domain.entities.remoteInput.PhysicalVolumeButtonActi
+ import com.atharok.btremote.domain.entities.remoteInput.keyboard.KeyboardLanguage
+ import com.atharok.btremote.domain.entities.settings.AppearanceSettings
+ import com.atharok.btremote.domain.entities.settings.RemoteSettings
++import com.atharok.btremote.domain.entities.settings.MinimalistLayout
+ import com.atharok.btremote.domain.entities.settings.ThemeEntity
+ import kotlinx.coroutines.flow.Flow
+
+@@ -43,6 +44,7 @@ interface DataStoreRepository {
+     suspend fun saveUseAdvancedKeyboardIntegrated(useAdvancedKeyboardIntegrated: Boolean)
+
+     suspend fun saveUseMinimalistRemote(useMinimalistRemote: Boolean)
++    suspend fun saveMinimalistLayout(layout: MinimalistLayout)
+
+     suspend fun saveRemoteNavigation(remoteNavigationEntity: RemoteNavigationEntity)
+
+diff --git a/app/src/main/java/com/atharok/btremote/domain/usecases/SettingsUseCase.kt b/app/src/main/java/com/atharok/btremote/domain/usecases/SettingsUseCase.kt
+index 06bf330..532ccc3 100644
+--- a/app/src/main/java/com/atharok/btremote/domain/usecases/SettingsUseCase.kt
++++ b/app/src/main/java/com/atharok/btremote/domain/usecases/SettingsUseCase.kt
+@@ -5,6 +5,7 @@ import com.atharok.btremote.domain.entities.remoteInput.PhysicalVolumeButtonActi
+ import com.atharok.btremote.domain.entities.remoteInput.keyboard.KeyboardLanguage
+ import com.atharok.btremote.domain.entities.settings.AppearanceSettings
+ import com.atharok.btremote.domain.entities.settings.RemoteSettings
++import com.atharok.btremote.domain.entities.settings.MinimalistLayout
+ import com.atharok.btremote.domain.entities.settings.ThemeEntity
+ import com.atharok.btremote.domain.repositories.DataStoreRepository
+ import kotlinx.coroutines.flow.Flow
+@@ -73,6 +74,10 @@ class SettingsUseCase(private val dataStoreRepository: DataStoreRepository) {
+         dataStoreRepository.saveUseMinimalistRemote(useMinimalistRemote)
+     }
+
++    suspend fun saveMinimalistLayout(layout: MinimalistLayout) {
++        dataStoreRepository.saveMinimalistLayout(layout)
++    }
++
+     suspend fun saveRemoteNavigation(remoteNavigationEntity: RemoteNavigationEntity) {
+         dataStoreRepository.saveRemoteNavigation(remoteNavigationEntity)
+     }
+diff --git a/app/src/main/java/com/atharok/btremote/presentation/services/TaskerCommandReceiver.kt b/app/src/main/java/com/atharok/btremote/presentation/services/TaskerCommandReceiver.kt
+index 5040090..d290256 100644
+--- a/app/src/main/java/com/atharok/btremote/presentation/services/TaskerCommandReceiver.kt
++++ b/app/src/main/java/com/atharok/btremote/presentation/services/TaskerCommandReceiver.kt
+@@ -25,6 +25,9 @@ internal class TaskerCommandReceiver(
+             "home" -> RemoteButtonProperties.HomeButton
+             "back" -> RemoteButtonProperties.BackButton
+             "power" -> RemoteButtonProperties.PowerButton
++            "play_pause" -> RemoteButtonProperties.PlayPauseButton
++            "next_track" -> RemoteButtonProperties.NextTrackButton
++            "previous_track" -> RemoteButtonProperties.PreviousTrackButton
+             else -> return
+         }
+         useCase.tapRemoteButton(button)
+diff --git a/app/src/main/java/com/atharok/btremote/presentation/viewmodel/SettingsViewModel.kt b/app/src/main/java/com/atharok/btremote/presentation/viewmodel/SettingsViewModel.kt
+index d9b0bd1..80cda83 100644
+--- a/app/src/main/java/com/atharok/btremote/presentation/viewmodel/SettingsViewModel.kt
++++ b/app/src/main/java/com/atharok/btremote/presentation/viewmodel/SettingsViewModel.kt
+@@ -7,6 +7,7 @@ import com.atharok.btremote.domain.entities.remoteInput.PhysicalVolumeButtonActi
+ import com.atharok.btremote.domain.entities.remoteInput.keyboard.KeyboardLanguage
+ import com.atharok.btremote.domain.entities.settings.AppearanceSettings
+ import com.atharok.btremote.domain.entities.settings.RemoteSettings
++import com.atharok.btremote.domain.entities.settings.MinimalistLayout
+ import com.atharok.btremote.domain.entities.settings.ThemeEntity
+ import com.atharok.btremote.domain.usecases.SettingsUseCase
+ import kotlinx.coroutines.flow.Flow
+@@ -76,6 +77,10 @@ class SettingsViewModel(
+         useCase.saveUseMinimalistRemote(useMinimalistRemote)
+     }
+
++    suspend fun saveMinimalistLayout(layout: MinimalistLayout) {
++        useCase.saveMinimalistLayout(layout)
++    }
++
+     fun saveRemoteNavigation(remoteNavigationEntity: RemoteNavigationEntity) = viewModelScope.launch {
+         useCase.saveRemoteNavigation(remoteNavigationEntity)
+     }
+diff --git a/app/src/main/java/com/atharok/btremote/ui/app/BtRemoteApp.kt b/app/src/main/java/com/atharok/btremote/ui/app/BtRemoteApp.kt
+index 13c4a66..1766552 100644
+--- a/app/src/main/java/com/atharok/btremote/ui/app/BtRemoteApp.kt
++++ b/app/src/main/java/com/atharok/btremote/ui/app/BtRemoteApp.kt
+@@ -40,6 +40,7 @@ import com.atharok.btremote.ui.screens.BluetoothPermissionsScreen
+ import com.atharok.btremote.ui.screens.DeviceDiscoveryScreen
+ import com.atharok.btremote.ui.screens.DevicesSelectionScreen
+ import com.atharok.btremote.ui.screens.DistantDevicePairScreen
++import com.atharok.btremote.ui.screens.MinimalistLayoutScreen
+ import com.atharok.btremote.ui.screens.RemoteScreen
+ import com.atharok.btremote.ui.screens.SettingsScreen
+ import com.atharok.btremote.ui.screens.ThirdLibrariesScreen
+@@ -138,6 +139,9 @@ fun BtRemoteApp(
+                     settingsScreen = {
+                         SettingsScreen(
+                             navigateUp = { navController.navigateUp() },
++                            navigateToMinimalistLayout = {
++                                navController.navigateTo(AppNavDestination.MinimalistLayoutDestination.route)
++                            },
+                             navigateToThirdLibrariesScreen = {
+                                 navController.navigateTo(AppNavDestination.ThirdLibrariesDestination.route)
+                             },
+@@ -145,6 +149,10 @@ fun BtRemoteApp(
+                         )
+                     },
+
++                    minimalistLayoutScreen = {
++                        MinimalistLayoutScreen(navigateUp = { navController.navigateUp() })
++                    },
++
+                     thirdLibrariesScreen = {
+                         ThirdLibrariesScreen(
+                             navigateUp = { navController.navigateUp() },
+diff --git a/app/src/main/java/com/atharok/btremote/ui/navigation/AppNavDestination.kt b/app/src/main/java/com/atharok/btremote/ui/navigation/AppNavDestination.kt
+index a948f45..fa7e2e8 100644
+--- a/app/src/main/java/com/atharok/btremote/ui/navigation/AppNavDestination.kt
++++ b/app/src/main/java/com/atharok/btremote/ui/navigation/AppNavDestination.kt
+@@ -3,6 +3,7 @@ package com.atharok.btremote.ui.navigation
+ sealed class AppNavDestination(val route: String) {
+     data object BluetoothPermissionsDestination: AppNavDestination(route = "bluetooth_permissions_route")
+     data object SettingsDestination: AppNavDestination(route = "settings_route")
++    data object MinimalistLayoutDestination: AppNavDestination(route = "minimalist_layout_route")
+     data object ThirdLibrariesDestination: AppNavDestination(route = "third_libraries_route")
+     data object BluetoothActivationDestination: AppNavDestination(route = "bluetooth_activation_route")
+     data object DeviceSelectionDestination: AppNavDestination(route = "bluetooth_device_selection_route")
+diff --git a/app/src/main/java/com/atharok/btremote/ui/navigation/AppNavHost.kt b/app/src/main/java/com/atharok/btremote/ui/navigation/AppNavHost.kt
+index 576e63d..1a41791 100644
+--- a/app/src/main/java/com/atharok/btremote/ui/navigation/AppNavHost.kt
++++ b/app/src/main/java/com/atharok/btremote/ui/navigation/AppNavHost.kt
+@@ -42,6 +42,7 @@ fun AppNavHost(
+     startDestination: String,
+     bluetoothPermissionsScreen: @Composable () -> Unit,
+     settingsScreen: @Composable () -> Unit,
++    minimalistLayoutScreen: @Composable () -> Unit,
+     thirdLibrariesScreen: @Composable () -> Unit,
+     bluetoothActivationScreen: @Composable () -> Unit,
+     deviceSelectionScreen: @Composable () -> Unit,
+@@ -76,6 +77,16 @@ fun AppNavHost(
+             settingsScreen()
+         }
+
++        composable(
++            route = AppNavDestination.MinimalistLayoutDestination.route,
++            enterTransition = enterTransition,
++            exitTransition = exitTransition,
++            popEnterTransition = popEnterTransition,
++            popExitTransition = popExitTransition
++        ) {
++            minimalistLayoutScreen()
++        }
++
+         composable(
+             route = AppNavDestination.ThirdLibrariesDestination.route,
+             enterTransition = enterTransition,
+diff --git a/app/src/main/java/com/atharok/btremote/ui/screens/RemoteScreen.kt b/app/src/main/java/com/atharok/btremote/ui/screens/RemoteScreen.kt
+index b1cd4e6..9ce10ec 100644
+--- a/app/src/main/java/com/atharok/btremote/ui/screens/RemoteScreen.kt
++++ b/app/src/main/java/com/atharok/btremote/ui/screens/RemoteScreen.kt
+@@ -46,6 +46,7 @@ import com.atharok.btremote.domain.entities.remoteInput.PhysicalVolumeButtonActi
+ import com.atharok.btremote.domain.entities.remoteInput.keyboard.KeyboardLanguage
+ import com.atharok.btremote.domain.entities.remoteInput.keyboard.virtualKeyboard.VirtualKeyboardLayout
+ import com.atharok.btremote.domain.entities.settings.RemoteSettings
++import com.atharok.btremote.domain.entities.settings.MinimalistLayout
+ import com.atharok.btremote.presentation.services.BluetoothHidService
+ import com.atharok.btremote.presentation.viewmodel.RemoteViewModel
+ import com.atharok.btremote.ui.components.AppScaffold
+@@ -131,6 +132,7 @@ fun RemoteScreen(
+         remoteLayout = {
+             RemoteLayout(
+                 useMinimalistRemote = remoteSettings.useMinimalistRemote,
++                minimalistLayout = remoteSettings.minimalistLayout,
+                 isAdvancedKeyboardVisible = remoteSettings.useAdvancedKeyboard && remoteSettings.useAdvancedKeyboardIntegrated && isKeyboardVisible,
+                 onMoreButtonsVisibleChanged = { isMoreButtonsVisible = !isMoreButtonsVisible },
+                 keyboardLanguage = remoteSettings.keyboardLanguage,
+@@ -309,6 +311,7 @@ private fun RemotePortraitView(
+ @Composable
+ private fun RemoteLayout(
+     useMinimalistRemote: Boolean,
++    minimalistLayout: MinimalistLayout,
+     isAdvancedKeyboardVisible: Boolean,
+     onMoreButtonsVisibleChanged: () -> Unit,
+     keyboardLanguage: KeyboardLanguage,
+@@ -328,6 +331,7 @@ private fun RemoteLayout(
+         } else {
+             RemoteButtonsLayouts(
+                 useMinimalistRemote = useMinimalistRemote,
++                minimalistLayout = minimalistLayout,
+                 onMoreButtonsVisibleChanged = onMoreButtonsVisibleChanged,
+                 sendRemoteKeyReport = sendRemoteKeyReport,
+                 sendKeyboardKeyReport = sendKeyboardKeyReport
+@@ -339,6 +343,7 @@ private fun RemoteLayout(
+ @Composable
+ private fun RemoteButtonsLayouts(
+     useMinimalistRemote: Boolean,
++    minimalistLayout: MinimalistLayout,
+     onMoreButtonsVisibleChanged: () -> Unit,
+     sendRemoteKeyReport: (ByteArray) -> Unit,
+     sendKeyboardKeyReport: (ByteArray) -> Unit
+@@ -347,7 +352,9 @@ private fun RemoteButtonsLayouts(
+         var isTVChannelButtonsVisible: Boolean by remember { mutableStateOf(false) }
+
+         MinimalistRemoteView(
++            layout = minimalistLayout,
+             sendRemoteKeyReport = sendRemoteKeyReport,
++            sendKeyboardKeyReport = sendKeyboardKeyReport,
+             onTVChannelButtonsChanged = {
+                 isTVChannelButtonsVisible = !isTVChannelButtonsVisible
+             },
+diff --git a/app/src/main/java/com/atharok/btremote/ui/screens/SettingsScreen.kt b/app/src/main/java/com/atharok/btremote/ui/screens/SettingsScreen.kt
+index fb3e0f0..ebc0d27 100644
+--- a/app/src/main/java/com/atharok/btremote/ui/screens/SettingsScreen.kt
++++ b/app/src/main/java/com/atharok/btremote/ui/screens/SettingsScreen.kt
+@@ -67,6 +67,7 @@ import org.koin.androidx.compose.koinViewModel
+ fun SettingsScreen(
+     navigateUp: () -> Unit,
+     navigateToThirdLibrariesScreen: () -> Unit,
++    navigateToMinimalistLayout: () -> Unit,
+     modifier: Modifier = Modifier,
+     settingsViewModel: SettingsViewModel = koinViewModel(),
+     context: Context = LocalContext.current,
+@@ -191,7 +192,7 @@ fun SettingsScreen(
+
+             SettingsSwitch(
+                 primaryText = stringResource(id = R.string.use_minimalist_interface),
+-                secondaryText = stringResource(id = R.string.minimalist_interface_info),
++                secondaryText = null,
+                 checked = remoteSettings.useMinimalistRemote,
+                 onCheckedChange = { settingsViewModel.saveUseMinimalistRemote(it) },
+                 modifier = Modifier
+@@ -202,6 +203,14 @@ fun SettingsScreen(
+                     )
+             )
+
++            SettingsText(
++                text = stringResource(id = R.string.customize_minimalist_remote),
++                modifier = Modifier
++                    .clickable(onClick = navigateToMinimalistLayout)
++                    .fillMaxWidth()
++                    .padding(horizontal = horizontalPadding, vertical = verticalPadding)
++            )
++
+             SettingsSwitch(
+                 primaryText = stringResource(id = R.string.use_mouse_navigation_by_default),
+                 secondaryText = null,
+diff --git a/app/src/main/java/com/atharok/btremote/ui/views/remote/RemoteView.kt b/app/src/main/java/com/atharok/btremote/ui/views/remote/RemoteView.kt
+index b5efe16..646e660 100644
+--- a/app/src/main/java/com/atharok/btremote/ui/views/remote/RemoteView.kt
++++ b/app/src/main/java/com/atharok/btremote/ui/views/remote/RemoteView.kt
+@@ -1,7 +1,6 @@
+ package com.atharok.btremote.ui.views.remote
+
+ import androidx.compose.foundation.layout.Arrangement
+-import androidx.compose.foundation.layout.Box
+ import androidx.compose.foundation.layout.Column
+ import androidx.compose.foundation.layout.Row
+ import androidx.compose.foundation.layout.fillMaxWidth
+@@ -12,14 +11,11 @@ import androidx.compose.ui.Alignment
+ import androidx.compose.ui.Modifier
+ import androidx.compose.ui.graphics.Shape
+ import androidx.compose.ui.res.dimensionResource
+-import androidx.compose.ui.res.stringResource
+ import androidx.compose.ui.unit.Dp
+ import com.atharok.btremote.R
+-import com.atharok.btremote.common.utils.AppIcons
+ import com.atharok.btremote.domain.entities.remoteInput.ChannelButtonProperties
+ import com.atharok.btremote.domain.entities.remoteInput.RemoteButtonProperties
+ import com.atharok.btremote.ui.components.customButtons.ChannelSurfaceButton
+-import com.atharok.btremote.ui.components.customButtons.IconSurfaceButton
+ import com.atharok.btremote.ui.components.customButtons.RemoteIconSurfaceButton
+
+ @Composable
+@@ -199,136 +195,6 @@ fun RemoteView(
+                 shape = buttonShape
+             )
+
+-            RemoteIconSurfaceButton(
+-                properties = RemoteButtonProperties.PowerButton,
+-                sendKeyReport = sendRemoteKeyReport,
+-                modifier = Modifier.weight(1f).padding(padding),
+-                shape = buttonShape
+-            )
+-        }
+-    }
+-}
+-
+-@Composable
+-fun MinimalistRemoteView(
+-    sendRemoteKeyReport: (ByteArray) -> Unit,
+-    onTVChannelButtonsChanged: () -> Unit,
+-    onMoreButtonsVisibleChanged: () -> Unit,
+-    modifier: Modifier = Modifier,
+-    buttonShape: Shape = CircleShape
+-) {
+-    val padding: Dp = dimensionResource(id = R.dimen.padding_normal)
+-
+-    Column(modifier = modifier) {
+-        MultimediaButtonsLayout(
+-            sendRemoteKeyReport = sendRemoteKeyReport,
+-            modifier = Modifier
+-                .fillMaxWidth()
+-                .weight(1f)
+-                .padding(padding),
+-            shape = buttonShape
+-        )
+-
+-        Row(
+-            modifier = Modifier.fillMaxWidth().weight(2f),
+-            horizontalArrangement = Arrangement.Absolute.SpaceBetween
+-        ) {
+-            Box(
+-                modifier = Modifier.weight(1f).padding(padding),
+-                contentAlignment = Alignment.CenterStart
+-            ) {
+-                VerticalButtonsLayout(
+-                    topButtonProperties = RemoteButtonProperties.VolumeUpButton,
+-                    bottomButtonProperties = RemoteButtonProperties.VolumeDownButton,
+-                    sendRemoteKeyReport = sendRemoteKeyReport,
+-                    modifier = Modifier,
+-                    shape = buttonShape
+-                )
+-            }
+-
+-            Column(
+-                modifier = Modifier.weight(2f)
+-            ) {
+-                Row(
+-                    modifier = Modifier.weight(1f)
+-                ) {
+-                    RemoteIconSurfaceButton(
+-                        properties = RemoteButtonProperties.VolumeMuteButton,
+-                        sendKeyReport = sendRemoteKeyReport,
+-                        modifier = Modifier.weight(1f).padding(padding),
+-                        shape = buttonShape
+-                    )
+-
+-                    RemoteIconSurfaceButton(
+-                        properties = RemoteButtonProperties.ClosedCaptionsButton,
+-                        sendKeyReport = sendRemoteKeyReport,
+-                        modifier = Modifier.weight(1f).padding(padding),
+-                        shape = buttonShape
+-                    )
+-                }
+-
+-                Row(
+-                    modifier = Modifier.weight(1f)
+-                ) {
+-                    IconSurfaceButton(
+-                        image = AppIcons.TVChannel,
+-                        contentDescription = stringResource(id = R.string.tv),
+-                        touchDown = {},
+-                        touchUp = onTVChannelButtonsChanged,
+-                        modifier = Modifier.weight(1f).padding(padding),
+-                        shape = buttonShape
+-                    )
+-
+-                    IconSurfaceButton(
+-                        image = AppIcons.MoreHoriz,
+-                        contentDescription = stringResource(id = R.string.more_buttons),
+-                        touchDown = {},
+-                        touchUp = onMoreButtonsVisibleChanged,
+-                        modifier = Modifier.weight(1f).padding(padding),
+-                        shape = buttonShape
+-                    )
+-                }
+-            }
+-
+-            Box(
+-                modifier = Modifier.weight(1f).padding(padding),
+-                contentAlignment = Alignment.CenterEnd
+-            ) {
+-                VerticalButtonsLayout(
+-                    topButtonProperties = RemoteButtonProperties.BrightnessUpButton,
+-                    bottomButtonProperties = RemoteButtonProperties.BrightnessDownButton,
+-                    sendRemoteKeyReport = sendRemoteKeyReport,
+-                    modifier = Modifier,
+-                    shape = buttonShape
+-                )
+-            }
+-        }
+-
+-        Row(
+-            modifier = Modifier.fillMaxWidth().weight(1f),
+-            horizontalArrangement = Arrangement.SpaceBetween
+-        ) {
+-            RemoteIconSurfaceButton(
+-                properties = RemoteButtonProperties.BackButton,
+-                sendKeyReport = sendRemoteKeyReport,
+-                modifier = Modifier.weight(1f).padding(padding),
+-                shape = buttonShape
+-            )
+-
+-            RemoteIconSurfaceButton(
+-                properties = RemoteButtonProperties.HomeButton,
+-                sendKeyReport = sendRemoteKeyReport,
+-                modifier = Modifier.weight(1f).padding(padding),
+-                shape = buttonShape
+-            )
+-
+-            RemoteIconSurfaceButton(
+-                properties = RemoteButtonProperties.MenuButton,
+-                sendKeyReport = sendRemoteKeyReport,
+-                modifier = Modifier.weight(1f).padding(padding),
+-                shape = buttonShape
+-            )
+-
+             RemoteIconSurfaceButton(
+                 properties = RemoteButtonProperties.PowerButton,
+                 sendKeyReport = sendRemoteKeyReport,
+diff --git a/app/src/main/res/values/strings.xml b/app/src/main/res/values/strings.xml
+index 9245e05..fe94b11 100644
+--- a/app/src/main/res/values/strings.xml
++++ b/app/src/main/res/values/strings.xml
+@@ -121,6 +121,14 @@
+     <string name="integrate_advanced_keyboard_into_the_view">Integrate the advanced keyboard into the view</string>
+     <string name="user_interface">Interface</string>
+     <string name="use_minimalist_interface">Use the minimalist interface</string>
++    <string name="customize_minimalist_remote">Customize minimalist remote</string>
++    <string name="minimalist_layout_instructions">Tap a slot to select it. Tap another slot to swap them, or use Choose button to replace it or leave it empty.</string>
++    <string name="minimalist_empty_slot">Empty</string>
++    <string name="minimalist_slot_description">Slot %1$d, %2$s</string>
++    <string name="minimalist_choose_button">Choose button</string>
++    <string name="minimalist_reset">Restore defaults</string>
++    <string name="minimalist_save">Save</string>
++    <string name="minimalist_save_failed">Couldn’t save the layout. Try again.</string>
+     <string name="use_mouse_navigation_by_default">Use mouse navigation by default</string>
+     <string name="minimalist_interface_info">Does not display the TV channel buttons</string>
+     <string name="navigation_mode">Navigation Mode</string>
+diff --git a/app/src/main/java/com/atharok/btremote/domain/entities/settings/MinimalistLayout.kt b/app/src/main/java/com/atharok/btremote/domain/entities/settings/MinimalistLayout.kt
+new file mode 100644
+index 0000000..b4e14e6
+--- /dev/null
++++ b/app/src/main/java/com/atharok/btremote/domain/entities/settings/MinimalistLayout.kt
+@@ -0,0 +1,83 @@
++package com.atharok.btremote.domain.entities.settings
++
++import com.atharok.btremote.domain.entities.remoteInput.ChannelButtonProperties
++import com.atharok.btremote.domain.entities.remoteInput.RemoteButtonProperties
++import com.atharok.btremote.domain.entities.settings.MinimalistButton.*
++
++enum class MinimalistButton(
++    val remote: RemoteButtonProperties? = null,
++    val channel: ChannelButtonProperties? = null
++) {
++    REWIND(RemoteButtonProperties.RewindButton),
++    PLAY_PAUSE(RemoteButtonProperties.PlayPauseButton),
++    FAST_FORWARD(RemoteButtonProperties.ForwardButton),
++    PREVIOUS_TRACK(RemoteButtonProperties.PreviousTrackButton),
++    NEXT_TRACK(RemoteButtonProperties.NextTrackButton),
++    PLAY(RemoteButtonProperties.PlayButton),
++    PAUSE(RemoteButtonProperties.PauseButton),
++    STOP(RemoteButtonProperties.StopButton),
++    REPEAT(RemoteButtonProperties.RepeatButton),
++    VOLUME_UP(RemoteButtonProperties.VolumeUpButton),
++    VOLUME_DOWN(RemoteButtonProperties.VolumeDownButton),
++    MUTE(RemoteButtonProperties.VolumeMuteButton),
++    CLOSED_CAPTIONS(RemoteButtonProperties.ClosedCaptionsButton),
++    BRIGHTNESS_UP(RemoteButtonProperties.BrightnessUpButton),
++    BRIGHTNESS_DOWN(RemoteButtonProperties.BrightnessDownButton),
++    CHANNEL_UP(RemoteButtonProperties.ChannelUpButton),
++    CHANNEL_DOWN(RemoteButtonProperties.ChannelDownButton),
++    CHANNELS,
++    MORE,
++    BACK(RemoteButtonProperties.BackButton),
++    HOME(RemoteButtonProperties.HomeButton),
++    MENU(RemoteButtonProperties.MenuButton),
++    POWER(RemoteButtonProperties.PowerButton),
++    UP(RemoteButtonProperties.MenuUpButton),
++    DOWN(RemoteButtonProperties.MenuDownButton),
++    LEFT(RemoteButtonProperties.MenuLeftButton),
++    RIGHT(RemoteButtonProperties.MenuRightButton),
++    SELECT(RemoteButtonProperties.MenuPickButton),
++    RED(RemoteButtonProperties.RedMenuButton),
++    GREEN(RemoteButtonProperties.GreenMenuButton),
++    BLUE(RemoteButtonProperties.BlueMenuButton),
++    YELLOW(RemoteButtonProperties.YellowMenuButton),
++    DIGIT_0(channel = ChannelButtonProperties.Channel0Button),
++    DIGIT_1(channel = ChannelButtonProperties.Channel1Button),
++    DIGIT_2(channel = ChannelButtonProperties.Channel2Button),
++    DIGIT_3(channel = ChannelButtonProperties.Channel3Button),
++    DIGIT_4(channel = ChannelButtonProperties.Channel4Button),
++    DIGIT_5(channel = ChannelButtonProperties.Channel5Button),
++    DIGIT_6(channel = ChannelButtonProperties.Channel6Button),
++    DIGIT_7(channel = ChannelButtonProperties.Channel7Button),
++    DIGIT_8(channel = ChannelButtonProperties.Channel8Button),
++    DIGIT_9(channel = ChannelButtonProperties.Channel9Button)
++}
++
++@JvmInline
++value class MinimalistLayout private constructor(val buttons: List<MinimalistButton?>) {
++    fun replace(index: Int, button: MinimalistButton?): MinimalistLayout =
++        MinimalistLayout(buttons.toMutableList().apply { this[index] = button })
++
++    fun swap(first: Int, second: Int): MinimalistLayout =
++        replace(first, buttons[second]).replace(second, buttons[first])
++
++    fun encode(): String = buttons.joinToString(",") { it?.name.orEmpty() }
++
++    companion object {
++        val slotRows = listOf(0..2, 3..6, 7..10, 11..14)
++        private val slotCount = slotRows.last().last + 1
++        private val buttonsByName = MinimalistButton.entries.associateBy { it.name }
++
++        val Default = MinimalistLayout(listOf(
++            REWIND, PLAY_PAUSE, FAST_FORWARD,
++            VOLUME_UP, MUTE, CLOSED_CAPTIONS, BRIGHTNESS_UP,
++            VOLUME_DOWN, CHANNELS, MORE, BRIGHTNESS_DOWN,
++            BACK, HOME, MENU, POWER
++        ))
++
++        fun decode(encoded: String?): MinimalistLayout {
++            val slots = encoded?.split(',') ?: return Default
++            if (slots.size != slotCount) return Default
++            return MinimalistLayout(slots.map { buttonsByName[it] })
++        }
++    }
++}
+diff --git a/app/src/main/java/com/atharok/btremote/ui/screens/MinimalistLayoutScreen.kt b/app/src/main/java/com/atharok/btremote/ui/screens/MinimalistLayoutScreen.kt
+new file mode 100644
+index 0000000..d9ee9dc
+--- /dev/null
++++ b/app/src/main/java/com/atharok/btremote/ui/screens/MinimalistLayoutScreen.kt
+@@ -0,0 +1,194 @@
++package com.atharok.btremote.ui.screens
++
++import androidx.compose.foundation.layout.Arrangement
++import androidx.compose.foundation.layout.Column
++import androidx.compose.foundation.layout.Row
++import androidx.compose.foundation.layout.fillMaxSize
++import androidx.compose.foundation.layout.fillMaxWidth
++import androidx.compose.foundation.layout.height
++import androidx.compose.foundation.layout.padding
++import androidx.compose.foundation.layout.size
++import androidx.compose.foundation.rememberScrollState
++import androidx.compose.foundation.verticalScroll
++import androidx.compose.material3.Button
++import androidx.compose.material3.CircularProgressIndicator
++import androidx.compose.material3.FilterChip
++import androidx.compose.material3.Icon
++import androidx.compose.material3.MaterialTheme
++import androidx.compose.material3.Text
++import androidx.compose.material3.TextButton
++import androidx.compose.runtime.Composable
++import androidx.compose.runtime.getValue
++import androidx.compose.runtime.mutableStateOf
++import androidx.compose.runtime.rememberCoroutineScope
++import androidx.compose.runtime.remember
++import androidx.compose.runtime.saveable.rememberSaveable
++import androidx.compose.runtime.setValue
++import androidx.compose.ui.Alignment
++import androidx.compose.ui.Modifier
++import androidx.compose.ui.res.stringResource
++import androidx.compose.ui.semantics.contentDescription
++import androidx.compose.ui.semantics.semantics
++import androidx.compose.ui.text.style.TextAlign
++import androidx.compose.ui.unit.dp
++import androidx.lifecycle.compose.collectAsStateWithLifecycle
++import com.atharok.btremote.R
++import com.atharok.btremote.domain.entities.settings.MinimalistButton
++import com.atharok.btremote.domain.entities.settings.MinimalistLayout
++import com.atharok.btremote.domain.entities.settings.RemoteSettings
++import com.atharok.btremote.presentation.viewmodel.SettingsViewModel
++import com.atharok.btremote.ui.components.AppScaffold
++import com.atharok.btremote.ui.components.ListDialog
++import com.atharok.btremote.ui.components.NavigateUpIconButton
++import com.atharok.btremote.ui.views.remote.MinimalistButtonGrid
++import com.atharok.btremote.ui.views.remote.icon
++import com.atharok.btremote.ui.views.remote.label
++import java.io.IOException
++import kotlinx.coroutines.launch
++import org.koin.androidx.compose.koinViewModel
++
++@Composable
++fun MinimalistLayoutScreen(
++    navigateUp: () -> Unit,
++    settingsViewModel: SettingsViewModel = koinViewModel()
++) {
++    val settings by settingsViewModel.remoteSettingsFlow.collectAsStateWithLifecycle(
++        initialValue = null as RemoteSettings?
++    )
++    val scope = rememberCoroutineScope()
++    var draft by rememberSaveable { mutableStateOf<String?>(null) }
++    var selection by rememberSaveable { mutableStateOf<Int?>(null) }
++    var pickingButton by rememberSaveable { mutableStateOf(false) }
++    var saving by remember { mutableStateOf(false) }
++    var saveFailed by rememberSaveable { mutableStateOf(false) }
++
++    val storedLayout = settings?.minimalistLayout
++    val layout = draft?.let { MinimalistLayout.decode(it) } ?: storedLayout
++
++    AppScaffold(
++        title = stringResource(R.string.customize_minimalist_remote),
++        navigateUp = { NavigateUpIconButton(navigateUp) },
++        topBarActions = {
++            TextButton(
++                enabled = !saving && layout != null && storedLayout != null && layout != storedLayout,
++                onClick = {
++                    val updatedLayout = layout ?: return@TextButton
++                    saving = true
++                    saveFailed = false
++                    scope.launch {
++                        try {
++                            settingsViewModel.saveMinimalistLayout(updatedLayout)
++                            navigateUp()
++                        } catch (_: IOException) {
++                            saveFailed = true
++                        } finally {
++                            saving = false
++                        }
++                    }
++                }
++            ) {
++                Text(stringResource(R.string.minimalist_save))
++            }
++        }
++    ) { innerPadding ->
++        Column(
++            modifier = Modifier
++                .fillMaxSize()
++                .padding(innerPadding)
++                .verticalScroll(rememberScrollState())
++                .padding(16.dp),
++            verticalArrangement = Arrangement.spacedBy(12.dp)
++        ) {
++            if (layout == null) {
++                CircularProgressIndicator()
++                return@Column
++            }
++
++            Text(stringResource(R.string.minimalist_layout_instructions))
++
++            MinimalistButtonGrid(Modifier.height(272.dp)) { index, slotModifier ->
++                val button = layout.buttons[index]
++                val label = button.label()
++                val slotDescription = stringResource(R.string.minimalist_slot_description, index + 1, label)
++                FilterChip(
++                    selected = selection == index,
++                    enabled = !saving,
++                    onClick = {
++                        val previous = selection
++                        when {
++                            previous == index -> selection = null
++                            previous == null -> selection = index
++                            else -> {
++                                draft = layout.swap(previous, index).encode()
++                                selection = null
++                            }
++                        }
++                    },
++                    label = {
++                        Column(
++                            modifier = Modifier.fillMaxWidth(),
++                            horizontalAlignment = Alignment.CenterHorizontally
++                        ) {
++                            button?.icon?.let {
++                                Icon(it, contentDescription = null, modifier = Modifier.size(20.dp))
++                            }
++                            Text(
++                                text = label,
++                                style = MaterialTheme.typography.labelSmall,
++                                textAlign = TextAlign.Center,
++                                maxLines = 2
++                            )
++                        }
++                    },
++                    modifier = slotModifier.semantics { contentDescription = slotDescription }
++                )
++            }
++
++            Row(
++                modifier = Modifier.fillMaxWidth(),
++                horizontalArrangement = Arrangement.SpaceBetween
++            ) {
++                Button(
++                    enabled = selection != null && !saving,
++                    onClick = { pickingButton = true }
++                ) {
++                    Text(stringResource(R.string.minimalist_choose_button))
++                }
++                TextButton(
++                    enabled = !saving && layout != MinimalistLayout.Default,
++                    onClick = {
++                        draft = MinimalistLayout.Default.encode()
++                        selection = null
++                    }
++                ) {
++                    Text(stringResource(R.string.minimalist_reset))
++                }
++            }
++
++            if (saveFailed) {
++                Text(
++                    text = stringResource(R.string.minimalist_save_failed),
++                    color = MaterialTheme.colorScheme.error
++                )
++            }
++        }
++    }
++
++    val selectedSlot = selection
++    if (pickingButton && selectedSlot != null && layout != null) {
++        val choices = listOf(null) + MinimalistButton.entries
++        ListDialog(
++            confirmButtonText = stringResource(R.string.done),
++            dismissButtonText = stringResource(R.string.close),
++            onConfirmation = { index ->
++                draft = layout.replace(selectedSlot, choices[index]).encode()
++                pickingButton = false
++                selection = null
++            },
++            onDismissRequest = { pickingButton = false },
++            dialogTitle = stringResource(R.string.minimalist_choose_button),
++            items = choices.map { it.label() },
++            defaultItemIndex = choices.indexOf(layout.buttons[selectedSlot])
++        )
++    }
++}
+diff --git a/app/src/main/java/com/atharok/btremote/ui/views/remote/MinimalistRemoteView.kt b/app/src/main/java/com/atharok/btremote/ui/views/remote/MinimalistRemoteView.kt
+new file mode 100644
+index 0000000..ace7659
+--- /dev/null
++++ b/app/src/main/java/com/atharok/btremote/ui/views/remote/MinimalistRemoteView.kt
+@@ -0,0 +1,110 @@
++package com.atharok.btremote.ui.views.remote
++
++import androidx.compose.foundation.layout.Arrangement
++import androidx.compose.foundation.layout.Box
++import androidx.compose.foundation.layout.Column
++import androidx.compose.foundation.layout.Row
++import androidx.compose.foundation.layout.fillMaxHeight
++import androidx.compose.foundation.layout.fillMaxSize
++import androidx.compose.foundation.layout.fillMaxWidth
++import androidx.compose.foundation.layout.padding
++import androidx.compose.foundation.shape.CircleShape
++import androidx.compose.runtime.Composable
++import androidx.compose.runtime.key
++import androidx.compose.ui.Modifier
++import androidx.compose.ui.graphics.vector.ImageVector
++import androidx.compose.ui.res.dimensionResource
++import androidx.compose.ui.res.stringResource
++import com.atharok.btremote.R
++import com.atharok.btremote.common.utils.AppIcons
++import com.atharok.btremote.domain.entities.settings.MinimalistButton
++import com.atharok.btremote.domain.entities.settings.MinimalistLayout
++import com.atharok.btremote.ui.components.customButtons.ChannelSurfaceButton
++import com.atharok.btremote.ui.components.customButtons.IconSurfaceButton
++import com.atharok.btremote.ui.components.customButtons.RemoteIconSurfaceButton
++
++@Composable
++internal fun MinimalistRemoteView(
++    layout: MinimalistLayout,
++    sendRemoteKeyReport: (ByteArray) -> Unit,
++    sendKeyboardKeyReport: (ByteArray) -> Unit,
++    onTVChannelButtonsChanged: () -> Unit,
++    onMoreButtonsVisibleChanged: () -> Unit,
++    modifier: Modifier = Modifier
++) {
++    MinimalistButtonGrid(modifier) { index, slotModifier ->
++        val button = layout.buttons[index]
++        val remote = button?.remote
++        val channel = button?.channel
++        key(button) {
++            when {
++                remote != null -> RemoteIconSurfaceButton(
++                    properties = remote,
++                    sendKeyReport = sendRemoteKeyReport,
++                    modifier = slotModifier,
++                    shape = CircleShape
++                )
++
++                channel != null -> ChannelSurfaceButton(
++                    properties = channel,
++                    sendKeyReport = sendKeyboardKeyReport,
++                    modifier = slotModifier,
++                    shape = CircleShape
++                )
++
++                button == MinimalistButton.CHANNELS || button == MinimalistButton.MORE -> IconSurfaceButton(
++                    image = checkNotNull(button.icon),
++                    contentDescription = button.label(),
++                    touchDown = {},
++                    touchUp = if (button == MinimalistButton.CHANNELS) {
++                        onTVChannelButtonsChanged
++                    } else {
++                        onMoreButtonsVisibleChanged
++                    },
++                    modifier = slotModifier,
++                    shape = CircleShape
++                )
++
++                else -> Box(slotModifier)
++            }
++        }
++    }
++}
++
++@Composable
++internal fun MinimalistButtonGrid(
++    modifier: Modifier = Modifier,
++    content: @Composable (index: Int, modifier: Modifier) -> Unit
++) {
++    val padding = dimensionResource(R.dimen.padding_normal)
++    Column(modifier = modifier.fillMaxSize()) {
++        MinimalistLayout.slotRows.forEach { row ->
++            Row(
++                modifier = Modifier.fillMaxWidth().weight(1f),
++                horizontalArrangement = Arrangement.Center
++            ) {
++                row.forEach { index ->
++                    content(index, Modifier.weight(1f).fillMaxHeight().padding(padding))
++                }
++            }
++        }
++    }
++}
++
++internal val MinimalistButton.icon: ImageVector?
++    get() = when (this) {
++        MinimalistButton.CHANNELS -> AppIcons.TVChannel
++        MinimalistButton.MORE -> AppIcons.MoreHoriz
++        else -> remote?.icon
++    }
++
++@Composable
++internal fun MinimalistButton?.label(): String {
++    val labelRes = when (this) {
++        null -> R.string.minimalist_empty_slot
++        MinimalistButton.CHANNELS -> R.string.tv
++        MinimalistButton.MORE -> R.string.more_buttons
++        else -> remote?.stringRes
++    }
++    return labelRes?.let { stringResource(it) } ?: checkNotNull(this?.channel).text
++}

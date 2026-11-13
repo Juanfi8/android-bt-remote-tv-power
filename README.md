@@ -61,8 +61,14 @@ Replace `power` with any of these values, or use `command:%tv_command` and set t
 | Enter / D-pad Select | `enter` |
 | Home, Back | `home`, `back` |
 | Power toggle | `power` |
+| Play / Pause | `play_pause` |
+| Next track, Previous track | `next_track`, `previous_track` |
 
 Use one Send Intent action per button press. The app can stay in the background while Bluetooth is connected. If the TV drops Bluetooth in standby, the Power command cannot wake it over that connection.
+
+## Customize the minimalist remote
+
+In **Settings → Remote**, enable **Use the minimalist interface** and open **Customize minimalist remote**. Tap a slot and then another slot to swap or move buttons. Use **Choose button** to assign a different control or choose **Empty** to hide it. Tap **Save** to apply the layout, or **Restore defaults** and **Save** to get the original button arrangement back.
 
 ## Implementation
 
