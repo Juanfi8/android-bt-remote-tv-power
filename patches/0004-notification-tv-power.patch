@@ -1,0 +1,92 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Codex <codex@openai.com>
+Date: Fri, 13 Nov 2026 02:29:00 +0100
+Subject: [PATCH] Use TV power in the remote notification
+
+Replace the notification's rewind control with the existing Bluetooth HID
+power command. Keep the rewind action for the home screen widget.
+
+diff --git a/app/src/main/java/com/atharok/btremote/presentation/services/BluetoothHidService.kt b/app/src/main/java/com/atharok/btremote/presentation/services/BluetoothHidService.kt
+index 7649c06..2cbff25 100644
+--- a/app/src/main/java/com/atharok/btremote/presentation/services/BluetoothHidService.kt
++++ b/app/src/main/java/com/atharok/btremote/presentation/services/BluetoothHidService.kt
+@@ -27,8 +27,8 @@ import com.atharok.btremote.presentation.services.NotificationBroadcastReceiver.
+ import com.atharok.btremote.presentation.services.NotificationBroadcastReceiver.Companion.ACTION_LEFT
+ import com.atharok.btremote.presentation.services.NotificationBroadcastReceiver.Companion.ACTION_MULTIMEDIA_NEXT
+ import com.atharok.btremote.presentation.services.NotificationBroadcastReceiver.Companion.ACTION_MULTIMEDIA_PLAY_PAUSE
+-import com.atharok.btremote.presentation.services.NotificationBroadcastReceiver.Companion.ACTION_MULTIMEDIA_PREVIOUS
+ import com.atharok.btremote.presentation.services.NotificationBroadcastReceiver.Companion.ACTION_PICK
++import com.atharok.btremote.presentation.services.NotificationBroadcastReceiver.Companion.ACTION_POWER
+ import com.atharok.btremote.presentation.services.NotificationBroadcastReceiver.Companion.ACTION_RIGHT
+ import com.atharok.btremote.presentation.services.NotificationBroadcastReceiver.Companion.ACTION_UP
+ import com.atharok.btremote.presentation.services.NotificationBroadcastReceiver.Companion.ACTION_VOLUME_DOWN
+@@ -176,7 +176,7 @@ class BluetoothHidService : Service() {
+             this.setOnClickPendingIntent(R.id.notification_large_layout_volume_inc, createPendingIntent(ACTION_VOLUME_UP))
+             this.setOnClickPendingIntent(R.id.notification_large_layout_volume_dec, createPendingIntent(ACTION_VOLUME_DOWN))
+             this.setOnClickPendingIntent(R.id.notification_large_layout_play_pause, createPendingIntent(ACTION_MULTIMEDIA_PLAY_PAUSE))
+-            this.setOnClickPendingIntent(R.id.notification_large_layout_previous, createPendingIntent(ACTION_MULTIMEDIA_PREVIOUS))
++            this.setOnClickPendingIntent(R.id.notification_large_layout_power, createPendingIntent(ACTION_POWER))
+             this.setOnClickPendingIntent(R.id.notification_large_layout_next, createPendingIntent(ACTION_MULTIMEDIA_NEXT))
+             this.setOnClickPendingIntent(R.id.notification_large_layout_left, createPendingIntent(ACTION_LEFT))
+             this.setOnClickPendingIntent(R.id.notification_large_layout_right, createPendingIntent(ACTION_RIGHT))
+diff --git a/app/src/main/java/com/atharok/btremote/presentation/services/NotificationBroadcastReceiver.kt b/app/src/main/java/com/atharok/btremote/presentation/services/NotificationBroadcastReceiver.kt
+index 2716414..9480115 100644
+--- a/app/src/main/java/com/atharok/btremote/presentation/services/NotificationBroadcastReceiver.kt
++++ b/app/src/main/java/com/atharok/btremote/presentation/services/NotificationBroadcastReceiver.kt
+@@ -19,6 +19,7 @@ class NotificationBroadcastReceiver: BroadcastReceiver(), KoinComponent {
+         const val ACTION_MULTIMEDIA_PLAY_PAUSE = "action_multimedia_play_pause"
+         const val ACTION_MULTIMEDIA_PREVIOUS = "action_multimedia_previous"
+         const val ACTION_MULTIMEDIA_NEXT = "action_multimedia_next"
++        const val ACTION_POWER = "action_power"
+         const val ACTION_LEFT = "action_left"
+         const val ACTION_RIGHT = "action_right"
+         const val ACTION_UP = "action_up"
+@@ -36,6 +37,7 @@ class NotificationBroadcastReceiver: BroadcastReceiver(), KoinComponent {
+             ACTION_MULTIMEDIA_PLAY_PAUSE -> sendReport(RemoteButtonProperties.PlayPauseButton.input)
+             ACTION_MULTIMEDIA_PREVIOUS -> sendReport(RemoteButtonProperties.RewindButton.input)
+             ACTION_MULTIMEDIA_NEXT -> sendReport(RemoteButtonProperties.ForwardButton.input)
++            ACTION_POWER -> sendReport(RemoteButtonProperties.PowerButton.input)
+             ACTION_LEFT -> sendReport(RemoteButtonProperties.MenuLeftButton.input)
+             ACTION_RIGHT -> sendReport(RemoteButtonProperties.MenuRightButton.input)
+             ACTION_UP -> sendReport(RemoteButtonProperties.MenuUpButton.input)
+diff --git a/app/src/main/res/layout/notification_large_layout.xml b/app/src/main/res/layout/notification_large_layout.xml
+index 5095c55..67742ff 100644
+--- a/app/src/main/res/layout/notification_large_layout.xml
++++ b/app/src/main/res/layout/notification_large_layout.xml
+@@ -13,15 +13,15 @@
+         android:orientation="horizontal">
+
+         <ImageButton
+-            android:id="@+id/notification_large_layout_previous"
++            android:id="@+id/notification_large_layout_power"
+             android:layout_width="0dp"
+             android:layout_height="@dimen/notification_button_height"
+             android:layout_weight="1"
+             android:layout_margin="@dimen/notification_button_margin"
+             android:scaleType="fitCenter"
+             android:background="@drawable/notification_button_top_left"
+-            android:src="@drawable/round_fast_rewind_24"
+-            android:contentDescription="@string/rewind"
++            android:src="@drawable/round_power_settings_new_24"
++            android:contentDescription="@string/power"
+             />
+
+         <ImageButton
+diff --git a/app/src/main/res/drawable/round_power_settings_new_24.xml b/app/src/main/res/drawable/round_power_settings_new_24.xml
+new file mode 100644
+index 0000000..4d0f2ac
+--- /dev/null
++++ b/app/src/main/res/drawable/round_power_settings_new_24.xml
+@@ -0,0 +1,12 @@
++<vector xmlns:android="http://schemas.android.com/apk/res/android"
++    android:width="24dp"
++    android:height="24dp"
++    android:viewportWidth="24"
++    android:viewportHeight="24"
++    android:tint="?attr/colorControlNormal">
++    <path
++        android:pathData="M12,3v9M7.05,6.05a7,7 0,1 0,9.9 0"
++        android:strokeColor="@android:color/white"
++        android:strokeWidth="2"
++        android:strokeLineCap="round" />
++</vector>

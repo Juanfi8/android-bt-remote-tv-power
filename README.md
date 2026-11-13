@@ -1,5 +1,9 @@
 # Bluetooth HID Remote for Android
 
+This variant of [jqssun/android-bt-remote](https://github.com/jqssun/android-bt-remote) replaces the rewind button in the expanded notification with a TV Power button. It sends the same Bluetooth HID command as the Power button in the app.
+
+Get the APK from [Releases](../../releases/latest). This debug build installs alongside the upstream app. In the new install, connect to your TV, enable **Show remote buttons in notification** in Settings, and expand the notification. Waking the TV depends on whether it can receive Bluetooth input in standby.
+
 [![Stars](https://img.shields.io/github/stars/jqssun/android-bt-remote?label=stars&logo=GitHub)](https://github.com/jqssun/android-bt-remote)
 [![GitHub](https://img.shields.io/github/downloads/jqssun/android-bt-remote/total?label=GitHub&logo=GitHub)](https://github.com/jqssun/android-bt-remote/releases)
 [![license](https://img.shields.io/badge/License-GPLv3-blue.svg)](LICENSE)
