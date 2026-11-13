@@ -63,8 +63,9 @@ Replace `power` with any of these values, or use `command:%tv_command` and set t
 | Power toggle | `power` |
 | Play / Pause | `play_pause` |
 | Next track, Previous track | `next_track`, `previous_track` |
+| Digits 0 through 4 | `0`, `1`, `2`, `3`, `4` |
 
-Use one Send Intent action per button press. The app can stay in the background while Bluetooth is connected. If the TV drops Bluetooth in standby, the Power command cannot wake it over that connection.
+Use one Send Intent action per button press. For example, to enter 24, send `command:2` followed by `command:4`. The app can stay in the background while Bluetooth is connected. If the TV drops Bluetooth in standby, the Power command cannot wake it over that connection.
 
 ## Customize the minimalist remote
 

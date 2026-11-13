@@ -1,0 +1,78 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Codex <codex@openai.com>
+Subject: [PATCH] Support Tasker commands for digits 0 through 4
+
+Accept digit strings and the integer extras Tasker sends. Use the same
+keyboard HID press and release reports as the existing channel buttons.
+
+diff --git a/app/src/main/java/com/atharok/btremote/domain/usecases/BluetoothHidServiceUseCase.kt b/app/src/main/java/com/atharok/btremote/domain/usecases/BluetoothHidServiceUseCase.kt
+index 8c7165f..a846bf2 100644
+--- a/app/src/main/java/com/atharok/btremote/domain/usecases/BluetoothHidServiceUseCase.kt
++++ b/app/src/main/java/com/atharok/btremote/domain/usecases/BluetoothHidServiceUseCase.kt
+@@ -1,8 +1,10 @@
+ package com.atharok.btremote.domain.usecases
+
++import com.atharok.btremote.common.utils.KEYBOARD_REPORT_ID
+ import com.atharok.btremote.common.utils.REMOTE_INPUT_NONE
+ import com.atharok.btremote.common.utils.REMOTE_REPORT_ID
+ import com.atharok.btremote.domain.entities.DeviceHidConnectionState
++import com.atharok.btremote.domain.entities.remoteInput.ChannelButtonProperties
+ import com.atharok.btremote.domain.entities.remoteInput.RemoteButtonProperties
+ import com.atharok.btremote.domain.repositories.BluetoothRepository
+ import com.atharok.btremote.domain.repositories.DataStoreRepository
+@@ -37,8 +39,16 @@ class BluetoothHidServiceUseCase(
+     }
+
+     fun tapRemoteButton(button: RemoteButtonProperties) {
+-        bluetoothRepository.sendReport(REMOTE_REPORT_ID, button.input)
+-        bluetoothRepository.sendReport(REMOTE_REPORT_ID, REMOTE_INPUT_NONE)
++        tapButton(REMOTE_REPORT_ID, button.input)
++    }
++
++    fun tapChannelButton(button: ChannelButtonProperties) {
++        tapButton(KEYBOARD_REPORT_ID, button.input)
++    }
++
++    private fun tapButton(reportId: Int, input: ByteArray) {
++        bluetoothRepository.sendReport(reportId, input)
++        bluetoothRepository.sendReport(reportId, REMOTE_INPUT_NONE)
+     }
+
+     fun showRemoteButtonsInNotification(): Flow<Boolean> = dataStoreRepository.showRemoteButtonsInNotification()
+diff --git a/app/src/main/java/com/atharok/btremote/presentation/services/TaskerCommandReceiver.kt b/app/src/main/java/com/atharok/btremote/presentation/services/TaskerCommandReceiver.kt
+index d290256..b688535 100644
+--- a/app/src/main/java/com/atharok/btremote/presentation/services/TaskerCommandReceiver.kt
++++ b/app/src/main/java/com/atharok/btremote/presentation/services/TaskerCommandReceiver.kt
+@@ -4,6 +4,7 @@ import android.bluetooth.BluetoothProfile.STATE_CONNECTED
+ import android.content.BroadcastReceiver
+ import android.content.Context
+ import android.content.Intent
++import com.atharok.btremote.domain.entities.remoteInput.ChannelButtonProperties
+ import com.atharok.btremote.domain.entities.remoteInput.RemoteButtonProperties
+ import com.atharok.btremote.domain.usecases.BluetoothHidServiceUseCase
+
+@@ -14,7 +15,23 @@ internal class TaskerCommandReceiver(
+         if (intent.action != ACTION_TV_COMMAND || intent.`package` != context.packageName) return
+         if (useCase.getDeviceHidConnectionState().value.state != STATE_CONNECTED) return
+
+-        val button = when (intent.getStringExtra(EXTRA_COMMAND)) {
++        // Tasker sends bare numeric extras as integers.
++        val command = intent.getStringExtra(EXTRA_COMMAND)
++            ?: intent.getIntExtra(EXTRA_COMMAND, -1).toString()
++        val channelButton = when (command) {
++            "0" -> ChannelButtonProperties.Channel0Button
++            "1" -> ChannelButtonProperties.Channel1Button
++            "2" -> ChannelButtonProperties.Channel2Button
++            "3" -> ChannelButtonProperties.Channel3Button
++            "4" -> ChannelButtonProperties.Channel4Button
++            else -> null
++        }
++        if (channelButton != null) {
++            useCase.tapChannelButton(channelButton)
++            return
++        }
++
++        val button = when (command) {
+             "left" -> RemoteButtonProperties.MenuLeftButton
+             "right" -> RemoteButtonProperties.MenuRightButton
+             "up" -> RemoteButtonProperties.MenuUpButton

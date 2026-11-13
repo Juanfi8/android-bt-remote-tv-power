@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 
-VERSION_CODE="9"
-VERSION_NAME="0.0.9"
+VERSION_CODE="10"
+VERSION_NAME="0.0.10"
 
 set -euo pipefail
 
