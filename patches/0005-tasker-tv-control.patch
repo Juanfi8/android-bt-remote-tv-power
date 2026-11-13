@@ -1,0 +1,363 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Codex <codex@openai.com>
+Subject: [PATCH] Accept TV commands from Tasker while connected
+
+Let a package-targeted broadcast send a supported TV button over the
+active Bluetooth HID connection when the user enables Tasker control.
+Share the press and release path with the notification and widget.
+
+diff --git a/app/src/main/java/com/atharok/btremote/data/dataStore/SettingsDataStore.kt b/app/src/main/java/com/atharok/btremote/data/dataStore/SettingsDataStore.kt
+index 4d85108..3da317e 100644
+--- a/app/src/main/java/com/atharok/btremote/data/dataStore/SettingsDataStore.kt
++++ b/app/src/main/java/com/atharok/btremote/data/dataStore/SettingsDataStore.kt
+@@ -62,6 +62,7 @@ class SettingsDataStore(private val context: Context) {
+         private const val FAVORITE_DEVICES_KEY = "favorite_devices_key"
+         private const val AUTO_CONNECT_DEVICE_ADDRESS_KEY = "auto_connect_device_address_key"
+         private const val SHOW_REMOTE_BUTTONS_IN_NOTIFICATION_KEY = "show_remote_buttons_in_notification_key"
++        private const val TASKER_CONTROL_ENABLED_KEY = "tasker_control_enabled"
+         private const val HIDE_BLUETOOTH_ACTIVATION_BUTTON_KEY = "hide_bluetooth_activation_button_key"
+     }
+
+@@ -86,6 +87,7 @@ class SettingsDataStore(private val context: Context) {
+     private val favoriteDevicesKey = stringPreferencesKey(FAVORITE_DEVICES_KEY)
+     private val autoConnectDeviceAddressKey = stringPreferencesKey(AUTO_CONNECT_DEVICE_ADDRESS_KEY)
+     private val showRemoteButtonsInNotificationKey = booleanPreferencesKey(SHOW_REMOTE_BUTTONS_IN_NOTIFICATION_KEY)
++    private val taskerControlEnabledKey = booleanPreferencesKey(TASKER_CONTROL_ENABLED_KEY)
+     private val hideBluetoothActivationButtonKey = booleanPreferencesKey(HIDE_BLUETOOTH_ACTIVATION_BUTTON_KEY)
+
+     private fun Flow<Preferences>.catchException(): Flow<Preferences> = this.catch {
+@@ -320,6 +322,14 @@ class SettingsDataStore(private val context: Context) {
+         }
+     }
+
++    val taskerControlEnabledFlow: Flow<Boolean> = context.dataStore.data
++        .catchException()
++        .map { it[taskerControlEnabledKey] == true }
++
++    suspend fun saveTaskerControlEnabled(enabled: Boolean) {
++        context.dataStore.edit { it[taskerControlEnabledKey] = enabled }
++    }
++
+     val hideBluetoothActivationButtonFlow: Flow<Boolean> by lazy {
+         context.dataStore.data
+             .catchException()
+diff --git a/app/src/main/java/com/atharok/btremote/data/repositories/DataStoreRepositoryImpl.kt b/app/src/main/java/com/atharok/btremote/data/repositories/DataStoreRepositoryImpl.kt
+index 2e0e064..5dbf917 100644
+--- a/app/src/main/java/com/atharok/btremote/data/repositories/DataStoreRepositoryImpl.kt
++++ b/app/src/main/java/com/atharok/btremote/data/repositories/DataStoreRepositoryImpl.kt
+@@ -113,6 +113,11 @@ class DataStoreRepositoryImpl(
+         settingsDataStore.saveShowRemoteButtonsInNotification(show)
+     }
+
++    override fun taskerControlEnabled(): Flow<Boolean> = settingsDataStore.taskerControlEnabledFlow
++    override suspend fun saveTaskerControlEnabled(enabled: Boolean) {
++        settingsDataStore.saveTaskerControlEnabled(enabled)
++    }
++
+     override fun hideBluetoothActivationButton(): Flow<Boolean> = settingsDataStore.hideBluetoothActivationButtonFlow
+     override suspend fun saveHideBluetoothActivationButton(hide: Boolean) {
+         settingsDataStore.saveHideBluetoothActivationButton(hide)
+diff --git a/app/src/main/java/com/atharok/btremote/domain/repositories/DataStoreRepository.kt b/app/src/main/java/com/atharok/btremote/domain/repositories/DataStoreRepository.kt
+index d7f4cf6..3925090 100644
+--- a/app/src/main/java/com/atharok/btremote/domain/repositories/DataStoreRepository.kt
++++ b/app/src/main/java/com/atharok/btremote/domain/repositories/DataStoreRepository.kt
+@@ -65,6 +65,9 @@ interface DataStoreRepository {
+     fun showRemoteButtonsInNotification(): Flow<Boolean>
+     suspend fun saveShowRemoteButtonsInNotification(show: Boolean)
+
++    fun taskerControlEnabled(): Flow<Boolean>
++    suspend fun saveTaskerControlEnabled(enabled: Boolean)
++
+     fun hideBluetoothActivationButton(): Flow<Boolean>
+     suspend fun saveHideBluetoothActivationButton(hide: Boolean)
+ }
+\ No newline at end of file
+diff --git a/app/src/main/java/com/atharok/btremote/domain/usecases/BluetoothHidServiceUseCase.kt b/app/src/main/java/com/atharok/btremote/domain/usecases/BluetoothHidServiceUseCase.kt
+index ce986fa..8c7165f 100644
+--- a/app/src/main/java/com/atharok/btremote/domain/usecases/BluetoothHidServiceUseCase.kt
++++ b/app/src/main/java/com/atharok/btremote/domain/usecases/BluetoothHidServiceUseCase.kt
+@@ -1,7 +1,9 @@
+ package com.atharok.btremote.domain.usecases
+
++import com.atharok.btremote.common.utils.REMOTE_INPUT_NONE
+ import com.atharok.btremote.common.utils.REMOTE_REPORT_ID
+ import com.atharok.btremote.domain.entities.DeviceHidConnectionState
++import com.atharok.btremote.domain.entities.remoteInput.RemoteButtonProperties
+ import com.atharok.btremote.domain.repositories.BluetoothRepository
+ import com.atharok.btremote.domain.repositories.DataStoreRepository
+ import kotlinx.coroutines.flow.Flow
+@@ -34,9 +36,12 @@ class BluetoothHidServiceUseCase(
+         return bluetoothRepository.getDeviceHidConnectionState()
+     }
+
+-    fun sendRemoteReport(bytes: ByteArray): Boolean {
+-        return bluetoothRepository.sendReport(REMOTE_REPORT_ID, bytes)
++    fun tapRemoteButton(button: RemoteButtonProperties) {
++        bluetoothRepository.sendReport(REMOTE_REPORT_ID, button.input)
++        bluetoothRepository.sendReport(REMOTE_REPORT_ID, REMOTE_INPUT_NONE)
+     }
+
+     fun showRemoteButtonsInNotification(): Flow<Boolean> = dataStoreRepository.showRemoteButtonsInNotification()
++
++    fun taskerControlEnabled(): Flow<Boolean> = dataStoreRepository.taskerControlEnabled()
+ }
+\ No newline at end of file
+diff --git a/app/src/main/java/com/atharok/btremote/domain/usecases/SettingsUseCase.kt b/app/src/main/java/com/atharok/btremote/domain/usecases/SettingsUseCase.kt
+index be5013a..06bf330 100644
+--- a/app/src/main/java/com/atharok/btremote/domain/usecases/SettingsUseCase.kt
++++ b/app/src/main/java/com/atharok/btremote/domain/usecases/SettingsUseCase.kt
+@@ -100,6 +100,11 @@ class SettingsUseCase(private val dataStoreRepository: DataStoreRepository) {
+         dataStoreRepository.saveShowRemoteButtonsInNotification(show)
+     }
+
++    fun taskerControlEnabled(): Flow<Boolean> = dataStoreRepository.taskerControlEnabled()
++    suspend fun saveTaskerControlEnabled(enabled: Boolean) {
++        dataStoreRepository.saveTaskerControlEnabled(enabled)
++    }
++
+     fun hideBluetoothActivationButton(): Flow<Boolean> = dataStoreRepository.hideBluetoothActivationButton()
+     suspend fun saveHideBluetoothActivationButton(hide: Boolean) {
+         dataStoreRepository.saveHideBluetoothActivationButton(hide)
+diff --git a/app/src/main/java/com/atharok/btremote/presentation/services/BluetoothHidService.kt b/app/src/main/java/com/atharok/btremote/presentation/services/BluetoothHidService.kt
+index 2cbff25..4d2e924 100644
+--- a/app/src/main/java/com/atharok/btremote/presentation/services/BluetoothHidService.kt
++++ b/app/src/main/java/com/atharok/btremote/presentation/services/BluetoothHidService.kt
+@@ -9,10 +9,12 @@ import android.bluetooth.BluetoothProfile.STATE_CONNECTED
+ import android.bluetooth.BluetoothProfile.STATE_DISCONNECTED
+ import android.content.Context
+ import android.content.Intent
++import android.content.IntentFilter
+ import android.os.Binder
+ import android.os.IBinder
+ import android.widget.RemoteViews
+ import androidx.core.app.NotificationCompat
++import androidx.core.content.ContextCompat
+ import androidx.glance.appwidget.updateAll
+ import com.atharok.btremote.R
+ import com.atharok.btremote.common.utils.NOTIFICATION_CHANNEL_ID
+@@ -36,6 +38,8 @@ import com.atharok.btremote.presentation.services.NotificationBroadcastReceiver.
+ import kotlinx.coroutines.CoroutineScope
+ import kotlinx.coroutines.Dispatchers
+ import kotlinx.coroutines.Job
++import kotlinx.coroutines.flow.combine
++import kotlinx.coroutines.flow.distinctUntilChanged
+ import kotlinx.coroutines.flow.first
+ import kotlinx.coroutines.launch
+ import org.koin.android.ext.android.inject
+@@ -45,12 +49,23 @@ class BluetoothHidService : Service() {
+     private lateinit var notificationManager: NotificationManager
+     private var job: Job? = null
+     private var currentConnectionState = STATE_DISCONNECTED
++    private var taskerReceiver: TaskerCommandReceiver? = null
+
+     override fun onCreate() {
+         super.onCreate()
+         createNotificationChannel()
+
+         job = CoroutineScope(Dispatchers.Main).launch {
++            launch {
++                combine(
++                    useCase.taskerControlEnabled(),
++                    useCase.getDeviceHidConnectionState()
++                ) { enabled, connection ->
++                    enabled && connection.state == STATE_CONNECTED
++                }.distinctUntilChanged()
++                    .collect(::setTaskerReceiverEnabled)
++            }
++
+             useCase.getDeviceHidConnectionState().collect {
+                 when(it.state) {
+                     STATE_CONNECTED -> {
+@@ -202,6 +217,24 @@ class BluetoothHidService : Service() {
+         return PendingIntent.getActivity(this, 0, intent, PendingIntent.FLAG_IMMUTABLE)
+     }
+
++    // ---- Tasker control ----
++
++    private fun setTaskerReceiverEnabled(enabled: Boolean) {
++        if (enabled && taskerReceiver == null) {
++            val receiver = TaskerCommandReceiver(useCase)
++            ContextCompat.registerReceiver(
++                this,
++                receiver,
++                IntentFilter(TaskerCommandReceiver.ACTION_TV_COMMAND),
++                ContextCompat.RECEIVER_EXPORTED
++            )
++            taskerReceiver = receiver
++        } else if (!enabled) {
++            taskerReceiver?.let(::unregisterReceiver)
++            taskerReceiver = null
++        }
++    }
++
+     // ---- Bluetooth HID Profile ----
+
+     private fun startBluetoothHidProfile() {
+@@ -211,6 +244,7 @@ class BluetoothHidService : Service() {
+     private fun stopBluetoothHidProfile() {
+         job?.cancel()
+         job = null
++        setTaskerReceiverEnabled(false)
+         useCase.stopHidProfile()
+     }
+
+diff --git a/app/src/main/java/com/atharok/btremote/presentation/services/NotificationBroadcastReceiver.kt b/app/src/main/java/com/atharok/btremote/presentation/services/NotificationBroadcastReceiver.kt
+index 9480115..0c57360 100644
+--- a/app/src/main/java/com/atharok/btremote/presentation/services/NotificationBroadcastReceiver.kt
++++ b/app/src/main/java/com/atharok/btremote/presentation/services/NotificationBroadcastReceiver.kt
+@@ -3,7 +3,6 @@ package com.atharok.btremote.presentation.services
+ import android.content.BroadcastReceiver
+ import android.content.Context
+ import android.content.Intent
+-import com.atharok.btremote.common.utils.REMOTE_INPUT_NONE
+ import com.atharok.btremote.domain.entities.remoteInput.RemoteButtonProperties
+ import com.atharok.btremote.domain.usecases.BluetoothHidServiceUseCase
+ import org.koin.core.component.KoinComponent
+@@ -32,19 +31,19 @@ class NotificationBroadcastReceiver: BroadcastReceiver(), KoinComponent {
+
+     override fun onReceive(context: Context?, intent: Intent?) {
+         when(intent?.action) {
+-            ACTION_VOLUME_UP -> sendReport(RemoteButtonProperties.VolumeUpButton.input)
+-            ACTION_VOLUME_DOWN -> sendReport(RemoteButtonProperties.VolumeDownButton.input)
+-            ACTION_MULTIMEDIA_PLAY_PAUSE -> sendReport(RemoteButtonProperties.PlayPauseButton.input)
+-            ACTION_MULTIMEDIA_PREVIOUS -> sendReport(RemoteButtonProperties.RewindButton.input)
+-            ACTION_MULTIMEDIA_NEXT -> sendReport(RemoteButtonProperties.ForwardButton.input)
+-            ACTION_POWER -> sendReport(RemoteButtonProperties.PowerButton.input)
+-            ACTION_LEFT -> sendReport(RemoteButtonProperties.MenuLeftButton.input)
+-            ACTION_RIGHT -> sendReport(RemoteButtonProperties.MenuRightButton.input)
+-            ACTION_UP -> sendReport(RemoteButtonProperties.MenuUpButton.input)
+-            ACTION_DOWN -> sendReport(RemoteButtonProperties.MenuDownButton.input)
+-            ACTION_PICK -> sendReport(RemoteButtonProperties.MenuPickButton.input)
+-            ACTION_BACK -> sendReport(RemoteButtonProperties.BackButton.input)
+-            ACTION_HOME -> sendReport(RemoteButtonProperties.HomeButton.input)
++            ACTION_VOLUME_UP -> useCase.tapRemoteButton(RemoteButtonProperties.VolumeUpButton)
++            ACTION_VOLUME_DOWN -> useCase.tapRemoteButton(RemoteButtonProperties.VolumeDownButton)
++            ACTION_MULTIMEDIA_PLAY_PAUSE -> useCase.tapRemoteButton(RemoteButtonProperties.PlayPauseButton)
++            ACTION_MULTIMEDIA_PREVIOUS -> useCase.tapRemoteButton(RemoteButtonProperties.RewindButton)
++            ACTION_MULTIMEDIA_NEXT -> useCase.tapRemoteButton(RemoteButtonProperties.ForwardButton)
++            ACTION_POWER -> useCase.tapRemoteButton(RemoteButtonProperties.PowerButton)
++            ACTION_LEFT -> useCase.tapRemoteButton(RemoteButtonProperties.MenuLeftButton)
++            ACTION_RIGHT -> useCase.tapRemoteButton(RemoteButtonProperties.MenuRightButton)
++            ACTION_UP -> useCase.tapRemoteButton(RemoteButtonProperties.MenuUpButton)
++            ACTION_DOWN -> useCase.tapRemoteButton(RemoteButtonProperties.MenuDownButton)
++            ACTION_PICK -> useCase.tapRemoteButton(RemoteButtonProperties.MenuPickButton)
++            ACTION_BACK -> useCase.tapRemoteButton(RemoteButtonProperties.BackButton)
++            ACTION_HOME -> useCase.tapRemoteButton(RemoteButtonProperties.HomeButton)
+             ACTION_DISCONNECT -> {
+                 useCase.disconnectDevice()
+                 /*useCase.stopHidProfile()
+@@ -53,9 +52,4 @@ class NotificationBroadcastReceiver: BroadcastReceiver(), KoinComponent {
+             }
+         }
+     }
+-
+-    private fun sendReport(bytes: ByteArray) {
+-        useCase.sendRemoteReport(bytes)
+-        useCase.sendRemoteReport(REMOTE_INPUT_NONE)
+-    }
+ }
+\ No newline at end of file
+diff --git a/app/src/main/java/com/atharok/btremote/presentation/viewmodel/SettingsViewModel.kt b/app/src/main/java/com/atharok/btremote/presentation/viewmodel/SettingsViewModel.kt
+index ae60a71..d9b0bd1 100644
+--- a/app/src/main/java/com/atharok/btremote/presentation/viewmodel/SettingsViewModel.kt
++++ b/app/src/main/java/com/atharok/btremote/presentation/viewmodel/SettingsViewModel.kt
+@@ -103,6 +103,11 @@ class SettingsViewModel(
+         useCase.saveShowRemoteButtonsInNotification(show)
+     }
+
++    val taskerControlEnabledFlow: Flow<Boolean> get() = useCase.taskerControlEnabled()
++    fun saveTaskerControlEnabled(enabled: Boolean) = viewModelScope.launch {
++        useCase.saveTaskerControlEnabled(enabled)
++    }
++
+     val hideBluetoothActivationButtonFlow: Flow<Boolean> get() = useCase.hideBluetoothActivationButton()
+     fun saveHideBluetoothActivationButton(hide: Boolean) = viewModelScope.launch {
+         useCase.saveHideBluetoothActivationButton(hide)
+diff --git a/app/src/main/java/com/atharok/btremote/ui/screens/SettingsScreen.kt b/app/src/main/java/com/atharok/btremote/ui/screens/SettingsScreen.kt
+index 0c364ec..fb3e0f0 100644
+--- a/app/src/main/java/com/atharok/btremote/ui/screens/SettingsScreen.kt
++++ b/app/src/main/java/com/atharok/btremote/ui/screens/SettingsScreen.kt
+@@ -80,6 +80,7 @@ fun SettingsScreen(
+
+     // Advanced Options
+     val showRemoteButtonsInNotification: Boolean by settingsViewModel.showRemoteButtonsInNotificationFlow.collectAsStateWithLifecycle(initialValue = false)
++    val taskerControlEnabled by settingsViewModel.taskerControlEnabledFlow.collectAsStateWithLifecycle(initialValue = false)
+     val hideBluetoothActivationButton: Boolean by settingsViewModel.hideBluetoothActivationButtonFlow.collectAsStateWithLifecycle(initialValue = false)
+
+     AppScaffold(
+@@ -451,6 +452,19 @@ fun SettingsScreen(
+                     )
+             )
+
++            SettingsSwitch(
++                primaryText = stringResource(id = R.string.tasker_control),
++                secondaryText = stringResource(id = R.string.tasker_control_summary),
++                checked = taskerControlEnabled,
++                onCheckedChange = { settingsViewModel.saveTaskerControlEnabled(it) },
++                modifier = Modifier
++                    .fillMaxWidth()
++                    .padding(
++                        horizontal = horizontalPadding,
++                        vertical = verticalPadding
++                    )
++            )
++
+             SettingsSwitch(
+                 primaryText = stringResource(id = R.string.hide_bluetooth_activation_button),
+                 secondaryText = null,
+diff --git a/app/src/main/res/values/strings.xml b/app/src/main/res/values/strings.xml
+index 2b2cb89..9245e05 100644
+--- a/app/src/main/res/values/strings.xml
++++ b/app/src/main/res/values/strings.xml
+@@ -134,6 +134,8 @@
+     <string name="assign_action_volume_down_button">Assign an action to the volume down button</string>
+     <string name="advanced_options">Advanced Options</string>
+     <string name="show_remote_buttons_in_notification">Show remote buttons in notification</string>
++    <string name="tasker_control">Allow Tasker control</string>
++    <string name="tasker_control_summary">Let Tasker and other apps send remote buttons while Bluetooth is connected.</string>
+     <string name="hide_bluetooth_activation_button">Hide Bluetooth activation button at app startup</string>
+     <string name="about">About</string>
+     <string name="language">Language</string>
+diff --git a/app/src/main/java/com/atharok/btremote/presentation/services/TaskerCommandReceiver.kt b/app/src/main/java/com/atharok/btremote/presentation/services/TaskerCommandReceiver.kt
+new file mode 100644
+index 0000000..5040090
+--- /dev/null
++++ b/app/src/main/java/com/atharok/btremote/presentation/services/TaskerCommandReceiver.kt
+@@ -0,0 +1,37 @@
++package com.atharok.btremote.presentation.services
++
++import android.bluetooth.BluetoothProfile.STATE_CONNECTED
++import android.content.BroadcastReceiver
++import android.content.Context
++import android.content.Intent
++import com.atharok.btremote.domain.entities.remoteInput.RemoteButtonProperties
++import com.atharok.btremote.domain.usecases.BluetoothHidServiceUseCase
++
++internal class TaskerCommandReceiver(
++    private val useCase: BluetoothHidServiceUseCase
++) : BroadcastReceiver() {
++    override fun onReceive(context: Context, intent: Intent) {
++        if (intent.action != ACTION_TV_COMMAND || intent.`package` != context.packageName) return
++        if (useCase.getDeviceHidConnectionState().value.state != STATE_CONNECTED) return
++
++        val button = when (intent.getStringExtra(EXTRA_COMMAND)) {
++            "left" -> RemoteButtonProperties.MenuLeftButton
++            "right" -> RemoteButtonProperties.MenuRightButton
++            "up" -> RemoteButtonProperties.MenuUpButton
++            "down" -> RemoteButtonProperties.MenuDownButton
++            "volume_up" -> RemoteButtonProperties.VolumeUpButton
++            "volume_down" -> RemoteButtonProperties.VolumeDownButton
++            "enter" -> RemoteButtonProperties.MenuPickButton
++            "home" -> RemoteButtonProperties.HomeButton
++            "back" -> RemoteButtonProperties.BackButton
++            "power" -> RemoteButtonProperties.PowerButton
++            else -> return
++        }
++        useCase.tapRemoteButton(button)
++    }
++
++    companion object {
++        const val ACTION_TV_COMMAND = "io.github.jqssun.btremote.action.TV_COMMAND"
++        private const val EXTRA_COMMAND = "command"
++    }
++}

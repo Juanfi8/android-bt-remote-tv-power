@@ -37,6 +37,33 @@ Unlike network remote-control tools, this does not require a companion applicati
     - SteamOS
     - Windows XP Service Pack 2 and later
 
+## Control the TV from Tasker
+
+In Bluetooth Remote, enable **Settings → Advanced Options → Allow Tasker control** and connect to your TV. This switch is off by default. While enabled and connected, the app accepts the documented commands from Tasker and other apps on the phone.
+
+In a Tasker task, add a **Send Intent** action and fill in these fields:
+
+| Field | Value |
+| --- | --- |
+| Action | `io.github.jqssun.btremote.action.TV_COMMAND` |
+| Extra | `command:power` |
+| Package | `io.github.jqssun.btremote.debug` |
+| Target | Broadcast Receiver |
+
+Leave **Class**, **Data**, and **Mime Type** blank, and leave **Cat** set to **None**. The package above is for the debug APK. If you build the default release variant, use `io.github.jqssun.btremote` as the package.
+
+Replace `power` with any of these values, or use `command:%tv_command` and set that Tasker variable first:
+
+| TV button | Command |
+| --- | --- |
+| Left, Right, Up, Down | `left`, `right`, `up`, `down` |
+| Volume Up, Volume Down | `volume_up`, `volume_down` |
+| Enter / D-pad Select | `enter` |
+| Home, Back | `home`, `back` |
+| Power toggle | `power` |
+
+Use one Send Intent action per button press. The app can stay in the background while Bluetooth is connected. If the TV drops Bluetooth in standby, the Power command cannot wake it over that connection.
+
 ## Implementation
 
 **Remote** registers with Android's `BluetoothHidDevice` profile and sends HID reports for keyboard, mouse, and remote control actions. This build uses the upstream project as a submodule in [`src`](src) with additional modifications in [`patches`](patches).
